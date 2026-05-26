@@ -98,10 +98,15 @@ function createMockResponse() {
  */
 export const onRequest: PagesFunction = async (context) => {
   try {
-    // Store Cloudflare bindings
+    // Store Cloudflare bindings BEFORE creating the server
     if (context.env) {
       (globalThis as any).__CF_ENV = context.env;
-      console.log("[Cloudflare] D1 binding available:", !!context.env.DB);
+      console.log("[Cloudflare] D1 binding disponível:", !!context.env.DB);
+      if (!context.env.DB) {
+        console.warn("[Cloudflare] ⚠️  Aviso: D1 binding NÃO está disponível! Certifique-se de que está configurado no wrangler.toml");
+      }
+    } else {
+      console.warn("[Cloudflare] ⚠️  context.env não está definido!");
     }
 
     // Inject environment variables
@@ -114,9 +119,9 @@ export const onRequest: PagesFunction = async (context) => {
     }
 
     if (!app) {
-      console.log("[Cloudflare] Initializing Express app...");
+      console.log("[Cloudflare] Inicializando aplicativo Express...");
       app = await createServer();
-      console.log("[Cloudflare] Express app initialized successfully");
+      console.log("[Cloudflare] Express app inicializado com sucesso");
     }
 
     // Extract path
@@ -162,10 +167,10 @@ export const onRequest: PagesFunction = async (context) => {
       // Handle Express routing
       app._router.handle(req, res, (err: any) => {
         if (err) {
-          console.error("[Cloudflare] Routing error:", err);
+          console.error("[Cloudflare] Erro de roteamento:", err);
           resolve(new Response(JSON.stringify({
             success: false,
-            error: err.message || 'Internal server error',
+            error: err.message || 'Erro interno do servidor',
           }), {
             status: 500,
             headers: { 'Content-Type': 'application/json' },
@@ -175,9 +180,10 @@ export const onRequest: PagesFunction = async (context) => {
 
       // Timeout safety
       setTimeout(() => {
+        console.error("[Cloudflare] Timeout na requisição");
         resolve(new Response(JSON.stringify({
           success: false,
-          error: 'Request timeout',
+          error: 'Timeout na requisição',
         }), {
           status: 504,
           headers: { 'Content-Type': 'application/json' },
@@ -185,12 +191,12 @@ export const onRequest: PagesFunction = async (context) => {
       }, 29000);
     });
   } catch (error: any) {
-    console.error("[Cloudflare] CRITICAL ERROR:", error);
+    console.error("[Cloudflare] ERRO CRÍTICO:", error);
     const errorMessage = error instanceof Error ? error.message : String(error);
 
     return new Response(JSON.stringify({
       success: false,
-      error: `Cloudflare Function Error: ${errorMessage}`,
+      error: `Erro na função Cloudflare: ${errorMessage}`,
       details: error instanceof Error ? error.stack : String(error),
     }), {
       status: 500,

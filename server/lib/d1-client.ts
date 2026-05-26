@@ -28,11 +28,17 @@ export function getD1() {
     fs.mkdirSync(dbDir, { recursive: true });
   }
 
-  localDbInstance = new Database(dbPath);
-  localDbInstance.pragma('journal_mode = WAL');
-  initializeSchema();
+  try {
+    localDbInstance = new Database(dbPath);
+    localDbInstance.pragma('journal_mode = WAL');
+    initializeSchema();
+    console.log('[D1] SQLite local inicializado em:', dbPath);
 
-  return localDbInstance;
+    return localDbInstance;
+  } catch (error) {
+    console.error('[D1] Erro ao inicializar banco de dados local:', error);
+    throw new Error('Banco de dados local não disponível. Configure o D1 binding no Cloudflare.');
+  }
 }
 
 function initializeSchema() {
@@ -132,26 +138,39 @@ const transformCompatibilityRecord = (record: any): CompatibilityRecord => ({
 
 const runD1Query = async <T = any>(sql: string, params: any[] = []): Promise<T[]> => {
   const db = getCloudflareD1Binding();
-  if (!db) throw new Error('Cloudflare D1 binding not available');
+  if (!db) {
+    console.warn("[D1] Binding Cloudflare D1 não disponível. Usando fallback SQLite local.");
+    // Fallback to local SQLite
+    try {
+      const localDb = getD1();
+      const stmt = localDb.prepare(sql);
+      const results = stmt.all(...params) as T[];
+      console.log("[D1 Fallback] Query executada com sucesso, retornou", results.length, "linhas");
+      return results;
+    } catch (error) {
+      console.error("[D1 Fallback] Erro ao usar SQLite local:", error);
+      throw new Error('Nenhum banco de dados disponível (D1 e SQLite local ambos falharam)');
+    }
+  }
 
   try {
-    console.log("[D1] Executing query:", sql, "with params:", params);
+    console.log("[D1] Executando query:", sql, "com params:", params);
 
-    // D1 API expects a prepared statement with bind()
-    // The bind() method takes parameters and returns a statement
-    // The all() method executes and returns { success, results, error }
-    const result = await db.prepare(sql).bind(...params).all();
+    // D1 API: prepare().bind().all() returns { success, results, error }
+    const stmt = db.prepare(sql);
+    const boundStmt = stmt.bind(...params);
+    const result = await boundStmt.all();
 
     if (!result.success) {
-      const errorMsg = result.error?.message || String(result.error) || 'D1 query failed';
+      const errorMsg = result.error?.message || String(result.error) || 'Consulta D1 falhou';
       console.error("[D1] Query failed:", errorMsg);
-      throw new Error(`D1 Error: ${errorMsg}`);
+      throw new Error(`Erro D1: ${errorMsg}`);
     }
 
-    console.log("[D1] Query successful, returned", result.results?.length || 0, "rows");
+    console.log("[D1] Query bem-sucedida, retornou", result.results?.length || 0, "linhas");
     return (result.results || []) as T[];
   } catch (error) {
-    console.error("[D1] Query execution error:", error instanceof Error ? error.message : String(error));
+    console.error("[D1] Erro ao executar consulta:", error instanceof Error ? error.message : String(error));
     throw error;
   }
 };
@@ -163,42 +182,57 @@ const runD1QueryFirst = async <T = any>(sql: string, params: any[] = []): Promis
 
 export async function getAllProducts(): Promise<D1Product[]> {
   if (isCloudflareD1Available()) {
-    console.log("[getAllProducts] Using Cloudflare D1");
+    console.log("[getAllProducts] Usando Cloudflare D1");
     try {
       const products = await runD1Query<D1Product>('SELECT * FROM products ORDER BY code');
-      console.log("[getAllProducts] D1 returned", products.length, "products");
+      console.log("[getAllProducts] D1 retornou", products.length, "produtos");
       return products.map(transformD1Product);
     } catch (error) {
-      console.error("[getAllProducts] D1 query error:", error);
+      console.error("[getAllProducts] Erro na consulta D1:", error);
       throw error;
     }
   }
 
-  console.log("[getAllProducts] Using local SQLite");
-  const db = getD1();
-  const stmt = db.prepare('SELECT * FROM products ORDER BY code');
-  return (stmt.all() as D1Product[]).map(transformD1Product);
+  console.log("[getAllProducts] Usando SQLite local");
+  try {
+    const db = getD1();
+    const stmt = db.prepare('SELECT * FROM products ORDER BY code');
+    return (stmt.all() as D1Product[]).map(transformD1Product);
+  } catch (error) {
+    console.error("[getAllProducts] Erro ao acessar banco local:", error);
+    throw new Error('Nenhum banco de dados disponível. Configure o D1 no Cloudflare.');
+  }
 }
 
 export async function searchProducts(query: string): Promise<D1Product[]> {
   if (isCloudflareD1Available()) {
     const lower = query.toLowerCase();
-    const products = await runD1Query<D1Product>(
-      `SELECT * FROM products WHERE LOWER(code) LIKE ? OR LOWER(description) LIKE ? ORDER BY code LIMIT 20`,
-      [`%${lower}%`, `%${lower}%`]
-    );
-    return products.map(transformD1Product);
+    try {
+      const products = await runD1Query<D1Product>(
+        `SELECT * FROM products WHERE LOWER(code) LIKE ? OR LOWER(description) LIKE ? ORDER BY code LIMIT 20`,
+        [`%${lower}%`, `%${lower}%`]
+      );
+      return products.map(transformD1Product);
+    } catch (error) {
+      console.error("[searchProducts] Erro D1:", error);
+      throw error;
+    }
   }
 
-  const db = getD1();
-  const searchTerm = `%${query.toLowerCase()}%`;
-  const stmt = db.prepare(`
-    SELECT * FROM products 
-    WHERE LOWER(code) LIKE ? OR LOWER(description) LIKE ?
-    ORDER BY code
-    LIMIT 20
-  `);
-  return stmt.all(searchTerm, searchTerm) as D1Product[];
+  try {
+    const db = getD1();
+    const searchTerm = `%${query.toLowerCase()}%`;
+    const stmt = db.prepare(`
+      SELECT * FROM products
+      WHERE LOWER(code) LIKE ? OR LOWER(description) LIKE ?
+      ORDER BY code
+      LIMIT 20
+    `);
+    return stmt.all(searchTerm, searchTerm) as D1Product[];
+  } catch (error) {
+    console.error("[searchProducts] Erro ao buscar produtos:", error);
+    throw new Error('Nenhum banco de dados disponível. Configure o D1 no Cloudflare.');
+  }
 }
 
 export async function getProductByCode(code: string): Promise<D1Product | null> {
@@ -215,28 +249,35 @@ export async function getProductByCode(code: string): Promise<D1Product | null> 
 export async function insertProduct(product: Omit<D1Product, 'id' | 'created_at' | 'updated_at'>): Promise<D1Product> {
   if (isCloudflareD1Available()) {
     const db = getCloudflareD1Binding();
-    const result = await db.prepare(`
+    const sql = `
       INSERT OR REPLACE INTO products (code, description, marca, price_distributor, price_distributor_with_ipi, price_final, price_final_with_ipi, catalog_path)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(
-      product.code,
-      product.description,
-      product.marca || null,
-      product.price_distributor || 0,
-      product.price_distributor_with_ipi || 0,
-      product.price_final || 0,
-      product.price_final_with_ipi || 0,
-      product.catalog_path || null
-    ).run();
+    `;
 
-    if (!result.success) {
-      const errorMsg = result.error?.message || String(result.error) || 'Failed to insert product';
-      throw new Error(`D1 Error: ${errorMsg}`);
+    try {
+      const result = await db.prepare(sql).bind(
+        product.code,
+        product.description,
+        product.marca || null,
+        product.price_distributor || 0,
+        product.price_distributor_with_ipi || 0,
+        product.price_final || 0,
+        product.price_final_with_ipi || 0,
+        product.catalog_path || null
+      ).run();
+
+      if (!result.success) {
+        const errorMsg = result.error?.message || String(result.error) || 'Failed to insert product';
+        throw new Error(`D1 Error: ${errorMsg}`);
+      }
+
+      const inserted = await getProductByCode(product.code);
+      if (!inserted) throw new Error('Inserted product could not be loaded');
+      return inserted;
+    } catch (error) {
+      console.error("[insertProduct] D1 error:", error);
+      throw error;
     }
-
-    const inserted = await getProductByCode(product.code);
-    if (!inserted) throw new Error('Inserted product could not be loaded');
-    return inserted;
   }
 
   const db = getD1();
@@ -264,12 +305,14 @@ export async function insertProducts(products: Omit<D1Product, 'id' | 'created_a
     let count = 0;
     console.log("[insertProducts] Inserting", products.length, "products into D1");
 
+    const sql = `
+      INSERT OR REPLACE INTO products (code, description, marca, price_distributor, price_distributor_with_ipi, price_final, price_final_with_ipi, catalog_path)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+
     for (const item of products) {
       try {
-        const result = await db.prepare(`
-          INSERT OR REPLACE INTO products (code, description, marca, price_distributor, price_distributor_with_ipi, price_final, price_final_with_ipi, catalog_path)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `).bind(
+        const result = await db.prepare(sql).bind(
           item.code,
           item.description,
           item.marca || null,
@@ -501,28 +544,36 @@ export async function getCompatibilityById(id: string): Promise<CompatibilityRec
 
 export async function insertCompatibility(record: Omit<CompatibilityRecord, 'id' | 'created_at' | 'updated_at'>): Promise<CompatibilityRecord> {
   if (isCloudflareD1Available()) {
-    const result = await getCloudflareD1Binding().prepare(`
+    const db = getCloudflareD1Binding();
+    const sql = `
       INSERT INTO compatibility (equipamento, parametro, fabricante, modelo, acessorio, foto_produto, foto_conexao, observacoes)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(
-      record.equipamento,
-      record.parametro || null,
-      record.fabricante || null,
-      record.modelo || null,
-      record.acessorio || null,
-      record.foto_produto || null,
-      record.foto_conexao || null,
-      record.observacoes || null
-    ).run();
+    `;
 
-    if (!result.success) {
-      const errorMsg = result.error?.message || String(result.error) || 'Failed to insert compatibility';
-      throw new Error(`D1 Error: ${errorMsg}`);
+    try {
+      const result = await db.prepare(sql).bind(
+        record.equipamento,
+        record.parametro || null,
+        record.fabricante || null,
+        record.modelo || null,
+        record.acessorio || null,
+        record.foto_produto || null,
+        record.foto_conexao || null,
+        record.observacoes || null
+      ).run();
+
+      if (!result.success) {
+        const errorMsg = result.error?.message || String(result.error) || 'Failed to insert compatibility';
+        throw new Error(`D1 Error: ${errorMsg}`);
+      }
+
+      const inserted = await runD1QueryFirst<CompatibilityRecord>('SELECT * FROM compatibility WHERE equipamento = ? ORDER BY created_at DESC LIMIT 1', [record.equipamento]);
+      if (!inserted) throw new Error('Inserted compatibility record could not be loaded');
+      return transformCompatibilityRecord(inserted);
+    } catch (error) {
+      console.error("[insertCompatibility] D1 error:", error);
+      throw error;
     }
-
-    const inserted = await runD1QueryFirst<CompatibilityRecord>('SELECT * FROM compatibility WHERE id = last_insert_rowid()');
-    if (!inserted) throw new Error('Inserted compatibility record could not be loaded');
-    return transformCompatibilityRecord(inserted);
   }
 
   const db = getD1();
