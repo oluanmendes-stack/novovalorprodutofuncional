@@ -1,0 +1,18 @@
+compatibility_date = "2025-01-01"
+name = "valorproduto7"
+pages_build_output_dir = "dist/spa"
+compatibility_flags = [ "nodejs_compat" ]
+
+[vars]
+# These variables should be set in Cloudflare Dashboard
+# For local development, set them in .env file
+VITE_GOOGLE_DRIVE_API_KEY = "AIzaSyB8oIB_OOEwpaX4M0MExNWL8xUrgGmlVc0"
+VITE_GOOGLE_DRIVE_FOLDER_ID = "13eaiAf8VvEqxVvcxi2FEAG3IOwZxsa54"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "products"
+database_id = "b744dbfe-961b-4b0c-89cc-59237fdd910b"
+
+[dev]
+port = 8080
