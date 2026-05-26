@@ -136,18 +136,22 @@ const runD1Query = async <T = any>(sql: string, params: any[] = []): Promise<T[]
 
   try {
     console.log("[D1] Executing query:", sql, "with params:", params);
-    const stmt = db.prepare(sql);
-    const result = await stmt.bind(...params).all();
+
+    // D1 API expects a prepared statement with bind()
+    // The bind() method takes parameters and returns a statement
+    // The all() method executes and returns { success, results, error }
+    const result = await db.prepare(sql).bind(...params).all();
 
     if (!result.success) {
-      console.error("[D1] Query failed:", result.error);
-      throw result.error ?? new Error('D1 query failed');
+      const errorMsg = result.error?.message || String(result.error) || 'D1 query failed';
+      console.error("[D1] Query failed:", errorMsg);
+      throw new Error(`D1 Error: ${errorMsg}`);
     }
 
     console.log("[D1] Query successful, returned", result.results?.length || 0, "rows");
     return (result.results || []) as T[];
   } catch (error) {
-    console.error("[D1] Query execution error:", error);
+    console.error("[D1] Query execution error:", error instanceof Error ? error.message : String(error));
     throw error;
   }
 };
@@ -211,21 +215,25 @@ export async function getProductByCode(code: string): Promise<D1Product | null> 
 export async function insertProduct(product: Omit<D1Product, 'id' | 'created_at' | 'updated_at'>): Promise<D1Product> {
   if (isCloudflareD1Available()) {
     const db = getCloudflareD1Binding();
-    const stmt = db.prepare(`
+    const result = await db.prepare(`
       INSERT OR REPLACE INTO products (code, description, marca, price_distributor, price_distributor_with_ipi, price_final, price_final_with_ipi, catalog_path)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    const result = await stmt.bind(
+    `).bind(
       product.code,
       product.description,
       product.marca || null,
-      product.price_distributor,
-      product.price_distributor_with_ipi,
-      product.price_final,
-      product.price_final_with_ipi,
+      product.price_distributor || 0,
+      product.price_distributor_with_ipi || 0,
+      product.price_final || 0,
+      product.price_final_with_ipi || 0,
       product.catalog_path || null
     ).run();
-    if (!result.success) throw result.error ?? new Error('Failed to insert product into D1');
+
+    if (!result.success) {
+      const errorMsg = result.error?.message || String(result.error) || 'Failed to insert product';
+      throw new Error(`D1 Error: ${errorMsg}`);
+    }
+
     const inserted = await getProductByCode(product.code);
     if (!inserted) throw new Error('Inserted product could not be loaded');
     return inserted;
@@ -255,29 +263,31 @@ export async function insertProducts(products: Omit<D1Product, 'id' | 'created_a
     const db = getCloudflareD1Binding();
     let count = 0;
     console.log("[insertProducts] Inserting", products.length, "products into D1");
+
     for (const item of products) {
       try {
-        const stmt = db.prepare(`
+        const result = await db.prepare(`
           INSERT OR REPLACE INTO products (code, description, marca, price_distributor, price_distributor_with_ipi, price_final, price_final_with_ipi, catalog_path)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `);
-        const result = await stmt.bind(
+        `).bind(
           item.code,
           item.description,
           item.marca || null,
-          item.price_distributor,
-          item.price_distributor_with_ipi,
-          item.price_final,
-          item.price_final_with_ipi,
+          item.price_distributor || 0,
+          item.price_distributor_with_ipi || 0,
+          item.price_final || 0,
+          item.price_final_with_ipi || 0,
           item.catalog_path || null
         ).run();
+
         if (!result.success) {
-          console.error("[insertProducts] Failed to insert", item.code, ":", result.error);
-          throw result.error ?? new Error('Failed to insert product into D1');
+          const errorMsg = result.error?.message || String(result.error) || 'Failed to insert product';
+          console.error("[insertProducts] Failed to insert", item.code, ":", errorMsg);
+          throw new Error(`D1 Error: ${errorMsg}`);
         }
         count++;
       } catch (error) {
-        console.error("[insertProducts] Error inserting product", item.code, ":", error);
+        console.error("[insertProducts] Error inserting product", item.code, ":", error instanceof Error ? error.message : String(error));
         throw error;
       }
     }
@@ -331,9 +341,11 @@ export async function deleteAllProducts(): Promise<number> {
 
 export async function deleteProductByCode(code: string): Promise<boolean> {
   if (isCloudflareD1Available()) {
-    const stmt = getCloudflareD1Binding().prepare('DELETE FROM products WHERE code = ?');
-    const result = await stmt.bind(code).run();
-    if (!result.success) throw result.error ?? new Error('Failed to delete product from D1');
+    const result = await getCloudflareD1Binding().prepare('DELETE FROM products WHERE code = ?').bind(code).run();
+    if (!result.success) {
+      const errorMsg = result.error?.message || String(result.error) || 'Failed to delete product';
+      throw new Error(`D1 Error: ${errorMsg}`);
+    }
     return true;
   }
 
@@ -386,9 +398,11 @@ export async function updateProduct(code: string, updates: Partial<Omit<D1Produc
     values.push(code);
 
     const sql = `UPDATE products SET ${fields.join(', ')} WHERE code = ?`;
-    const stmt = getCloudflareD1Binding().prepare(sql);
-    const result = await stmt.bind(...values).run();
-    if (!result.success) throw result.error ?? new Error('Failed to update product in D1');
+    const result = await getCloudflareD1Binding().prepare(sql).bind(...values).run();
+    if (!result.success) {
+      const errorMsg = result.error?.message || String(result.error) || 'Failed to update product';
+      throw new Error(`D1 Error: ${errorMsg}`);
+    }
     return getProductByCode(code);
   }
 
@@ -487,11 +501,10 @@ export async function getCompatibilityById(id: string): Promise<CompatibilityRec
 
 export async function insertCompatibility(record: Omit<CompatibilityRecord, 'id' | 'created_at' | 'updated_at'>): Promise<CompatibilityRecord> {
   if (isCloudflareD1Available()) {
-    const stmt = getCloudflareD1Binding().prepare(`
+    const result = await getCloudflareD1Binding().prepare(`
       INSERT INTO compatibility (equipamento, parametro, fabricante, modelo, acessorio, foto_produto, foto_conexao, observacoes)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    const result = await stmt.bind(
+    `).bind(
       record.equipamento,
       record.parametro || null,
       record.fabricante || null,
@@ -501,7 +514,12 @@ export async function insertCompatibility(record: Omit<CompatibilityRecord, 'id'
       record.foto_conexao || null,
       record.observacoes || null
     ).run();
-    if (!result.success) throw result.error ?? new Error('Failed to insert compatibility record into D1');
+
+    if (!result.success) {
+      const errorMsg = result.error?.message || String(result.error) || 'Failed to insert compatibility';
+      throw new Error(`D1 Error: ${errorMsg}`);
+    }
+
     const inserted = await runD1QueryFirst<CompatibilityRecord>('SELECT * FROM compatibility WHERE id = last_insert_rowid()');
     if (!inserted) throw new Error('Inserted compatibility record could not be loaded');
     return transformCompatibilityRecord(inserted);
@@ -575,9 +593,11 @@ export async function updateCompatibility(id: string, updates: Partial<Omit<Comp
     values.push(id);
 
     const sql = `UPDATE compatibility SET ${fields.join(', ')} WHERE id = ?`;
-    const stmt = getCloudflareD1Binding().prepare(sql);
-    const result = await stmt.bind(...values).run();
-    if (!result.success) throw result.error ?? new Error('Failed to update compatibility record in D1');
+    const result = await getCloudflareD1Binding().prepare(sql).bind(...values).run();
+    if (!result.success) {
+      const errorMsg = result.error?.message || String(result.error) || 'Failed to update compatibility';
+      throw new Error(`D1 Error: ${errorMsg}`);
+    }
     return getCompatibilityById(id);
   }
 
@@ -632,9 +652,11 @@ export async function updateCompatibility(id: string, updates: Partial<Omit<Comp
 
 export async function deleteCompatibility(id: string): Promise<boolean> {
   if (isCloudflareD1Available()) {
-    const stmt = getCloudflareD1Binding().prepare('DELETE FROM compatibility WHERE id = ?');
-    const result = await stmt.bind(id).run();
-    if (!result.success) throw result.error ?? new Error('Failed to delete compatibility record from D1');
+    const result = await getCloudflareD1Binding().prepare('DELETE FROM compatibility WHERE id = ?').bind(id).run();
+    if (!result.success) {
+      const errorMsg = result.error?.message || String(result.error) || 'Failed to delete compatibility';
+      throw new Error(`D1 Error: ${errorMsg}`);
+    }
     return true;
   }
 
