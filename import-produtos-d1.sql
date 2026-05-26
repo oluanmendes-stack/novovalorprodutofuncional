@@ -1,7 +1,6 @@
 -- Script SQL para importar produtos no Cloudflare D1
 -- Copie e cole o conteúdo todo no Cloudflare Dashboard > D1 > SQL Editor
-
-BEGIN TRANSACTION;
+-- Não use BEGIN/COMMIT pois o Cloudflare D1 não aceita no console
 
 INSERT INTO products (code, description, marca, price_distributor, price_distributor_with_ipi, price_final, price_final_with_ipi) VALUES ('5L500', 'BATERIA DE LITIO NAO RECARREGAVEL', '', 2288.58, 2511.72, 2542.87, 2790.80);
 INSERT INTO products (code, description, marca, price_distributor, price_distributor_with_ipi, price_final, price_final_with_ipi) VALUES ('3L960', 'BATERIA DE NIMH INTERNA RECARREGAVEL', '', 2379.44, 2611.44, 2643.83, 2901.60);
