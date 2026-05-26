@@ -10,14 +10,21 @@ interface ImportStats {
   duplicates: number;
 }
 
+interface ErrorState {
+  message: string;
+  details?: string;
+}
+
 export default function CSVImporter() {
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState<ImportStats | null>(null);
+  const [error, setError] = useState<ErrorState | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleImportCSV = async (file: File) => {
     setLoading(true);
     setStats(null);
+    setError(null);
 
     try {
       const fileContent = await file.text();
@@ -35,7 +42,12 @@ export default function CSVImporter() {
       const data = await response.json();
 
       if (!response.ok) {
-        toast.error(`Erro ao importar: ${data.error}`);
+        const errorMsg = data.error || "Erro desconhecido ao importar";
+        setError({
+          message: errorMsg,
+          details: data.details,
+        });
+        toast.error(errorMsg);
         return;
       }
 
@@ -45,9 +57,14 @@ export default function CSVImporter() {
         duplicates: 0,
       });
 
-      toast.success(`${data.count} produtos importados com sucesso!`);
+      toast.success(`✓ ${data.count} produtos importados com sucesso!`);
     } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Erro ao processar o arquivo CSV";
       console.error("Erro na importação:", error);
+      setError({
+        message: "Erro ao processar o arquivo CSV",
+        details: errorMsg,
+      });
       toast.error("Erro ao processar o arquivo CSV");
     } finally {
       setLoading(false);
@@ -120,7 +137,25 @@ export default function CSVImporter() {
           )}
         </Button>
 
-        {stats && (
+        {error && (
+          <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="text-red-600 flex-shrink-0 mt-0.5" size={20} />
+              <div>
+                <p className="font-semibold text-red-900">
+                  {error.message}
+                </p>
+                {error.details && (
+                  <p className="mt-2 text-sm text-red-800">
+                    {error.details}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {stats && !error && (
           <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
             <div className="flex items-start gap-3">
               <CheckCircle className="text-green-600 flex-shrink-0 mt-0.5" size={20} />

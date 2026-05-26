@@ -92,21 +92,31 @@ export const importFromCSV: RequestHandler = async (req, res) => {
       const count = await insertProducts(products);
       res.json({
         success: true,
-        message: `${count} product(s) imported successfully from CSV`,
+        message: `${count} produto(s) importado(s) com sucesso do CSV`,
         count,
       });
-    } catch (error) {
-      console.error("[importFromCSV] D1 error:", error);
+    } catch (dbError) {
+      console.error("[importFromCSV] Erro D1:", dbError);
+
+      const errorMessage = dbError instanceof Error
+        ? dbError.message
+        : "Falha ao importar produtos";
+
       res.status(500).json({
         success: false,
-        error: error instanceof Error ? error.message : "Failed to import products",
+        error: `Erro ao processar o arquivo CSV: ${errorMessage}`,
       });
     }
   } catch (error) {
-    console.error("[importFromCSV] Error:", error);
+    console.error("[importFromCSV] Erro geral:", error);
+
+    const errorMessage = error instanceof Error
+      ? error.message
+      : "Erro desconhecido ao processar CSV";
+
     res.status(500).json({
       success: false,
-      error: error instanceof Error ? error.message : "Failed to import CSV",
+      error: `Erro ao processar o arquivo CSV: ${errorMessage}`,
     });
   }
 };

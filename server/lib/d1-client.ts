@@ -137,10 +137,10 @@ const runD1Query = async <T = any>(sql: string, params: any[] = []): Promise<T[]
   try {
     console.log("[D1] Executing query:", sql, "with params:", params);
 
-    // D1 API expects a prepared statement with bind()
-    // The bind() method takes parameters and returns a statement
-    // The all() method executes and returns { success, results, error }
-    const result = await db.prepare(sql).bind(...params).all();
+    // D1 API: prepare().bind().all() returns { success, results, error }
+    const stmt = db.prepare(sql);
+    const boundStmt = stmt.bind(...params);
+    const result = await boundStmt.all();
 
     if (!result.success) {
       const errorMsg = result.error?.message || String(result.error) || 'D1 query failed';
@@ -215,28 +215,35 @@ export async function getProductByCode(code: string): Promise<D1Product | null> 
 export async function insertProduct(product: Omit<D1Product, 'id' | 'created_at' | 'updated_at'>): Promise<D1Product> {
   if (isCloudflareD1Available()) {
     const db = getCloudflareD1Binding();
-    const result = await db.prepare(`
+    const sql = `
       INSERT OR REPLACE INTO products (code, description, marca, price_distributor, price_distributor_with_ipi, price_final, price_final_with_ipi, catalog_path)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(
-      product.code,
-      product.description,
-      product.marca || null,
-      product.price_distributor || 0,
-      product.price_distributor_with_ipi || 0,
-      product.price_final || 0,
-      product.price_final_with_ipi || 0,
-      product.catalog_path || null
-    ).run();
+    `;
 
-    if (!result.success) {
-      const errorMsg = result.error?.message || String(result.error) || 'Failed to insert product';
-      throw new Error(`D1 Error: ${errorMsg}`);
+    try {
+      const result = await db.prepare(sql).bind(
+        product.code,
+        product.description,
+        product.marca || null,
+        product.price_distributor || 0,
+        product.price_distributor_with_ipi || 0,
+        product.price_final || 0,
+        product.price_final_with_ipi || 0,
+        product.catalog_path || null
+      ).run();
+
+      if (!result.success) {
+        const errorMsg = result.error?.message || String(result.error) || 'Failed to insert product';
+        throw new Error(`D1 Error: ${errorMsg}`);
+      }
+
+      const inserted = await getProductByCode(product.code);
+      if (!inserted) throw new Error('Inserted product could not be loaded');
+      return inserted;
+    } catch (error) {
+      console.error("[insertProduct] D1 error:", error);
+      throw error;
     }
-
-    const inserted = await getProductByCode(product.code);
-    if (!inserted) throw new Error('Inserted product could not be loaded');
-    return inserted;
   }
 
   const db = getD1();
@@ -264,12 +271,14 @@ export async function insertProducts(products: Omit<D1Product, 'id' | 'created_a
     let count = 0;
     console.log("[insertProducts] Inserting", products.length, "products into D1");
 
+    const sql = `
+      INSERT OR REPLACE INTO products (code, description, marca, price_distributor, price_distributor_with_ipi, price_final, price_final_with_ipi, catalog_path)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+
     for (const item of products) {
       try {
-        const result = await db.prepare(`
-          INSERT OR REPLACE INTO products (code, description, marca, price_distributor, price_distributor_with_ipi, price_final, price_final_with_ipi, catalog_path)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `).bind(
+        const result = await db.prepare(sql).bind(
           item.code,
           item.description,
           item.marca || null,
@@ -501,28 +510,36 @@ export async function getCompatibilityById(id: string): Promise<CompatibilityRec
 
 export async function insertCompatibility(record: Omit<CompatibilityRecord, 'id' | 'created_at' | 'updated_at'>): Promise<CompatibilityRecord> {
   if (isCloudflareD1Available()) {
-    const result = await getCloudflareD1Binding().prepare(`
+    const db = getCloudflareD1Binding();
+    const sql = `
       INSERT INTO compatibility (equipamento, parametro, fabricante, modelo, acessorio, foto_produto, foto_conexao, observacoes)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(
-      record.equipamento,
-      record.parametro || null,
-      record.fabricante || null,
-      record.modelo || null,
-      record.acessorio || null,
-      record.foto_produto || null,
-      record.foto_conexao || null,
-      record.observacoes || null
-    ).run();
+    `;
 
-    if (!result.success) {
-      const errorMsg = result.error?.message || String(result.error) || 'Failed to insert compatibility';
-      throw new Error(`D1 Error: ${errorMsg}`);
+    try {
+      const result = await db.prepare(sql).bind(
+        record.equipamento,
+        record.parametro || null,
+        record.fabricante || null,
+        record.modelo || null,
+        record.acessorio || null,
+        record.foto_produto || null,
+        record.foto_conexao || null,
+        record.observacoes || null
+      ).run();
+
+      if (!result.success) {
+        const errorMsg = result.error?.message || String(result.error) || 'Failed to insert compatibility';
+        throw new Error(`D1 Error: ${errorMsg}`);
+      }
+
+      const inserted = await runD1QueryFirst<CompatibilityRecord>('SELECT * FROM compatibility WHERE equipamento = ? ORDER BY created_at DESC LIMIT 1', [record.equipamento]);
+      if (!inserted) throw new Error('Inserted compatibility record could not be loaded');
+      return transformCompatibilityRecord(inserted);
+    } catch (error) {
+      console.error("[insertCompatibility] D1 error:", error);
+      throw error;
     }
-
-    const inserted = await runD1QueryFirst<CompatibilityRecord>('SELECT * FROM compatibility WHERE id = last_insert_rowid()');
-    if (!inserted) throw new Error('Inserted compatibility record could not be loaded');
-    return transformCompatibilityRecord(inserted);
   }
 
   const db = getD1();
