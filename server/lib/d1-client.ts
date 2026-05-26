@@ -43,7 +43,7 @@ function initializeSchema() {
     console.warn('[D1] Schema file not found, creating basic schema');
     localDbInstance.exec(`
       CREATE TABLE IF NOT EXISTS products (
-        id TEXT PRIMARY KEY DEFAULT (hex(randomblob(16))),
+        id TEXT PRIMARY KEY,
         code TEXT NOT NULL UNIQUE,
         description TEXT NOT NULL,
         marca TEXT,
@@ -58,7 +58,7 @@ function initializeSchema() {
       CREATE INDEX IF NOT EXISTS idx_products_code ON products(code);
       CREATE INDEX IF NOT EXISTS idx_products_description ON products(description);
       CREATE TABLE IF NOT EXISTS compatibility (
-        id TEXT PRIMARY KEY DEFAULT (hex(randomblob(16))),
+        id TEXT PRIMARY KEY,
         equipamento TEXT NOT NULL,
         parametro TEXT,
         fabricante TEXT,
@@ -72,7 +72,7 @@ function initializeSchema() {
       );
       CREATE INDEX IF NOT EXISTS idx_compatibility_equipamento ON compatibility(equipamento);
       CREATE TABLE IF NOT EXISTS catalogs (
-        id TEXT PRIMARY KEY DEFAULT (hex(randomblob(16))),
+        id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         source TEXT,
         path TEXT,
