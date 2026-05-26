@@ -40,9 +40,12 @@ export const getProducts: RequestHandler = async (req, res) => {
     });
   } catch (error) {
     console.error("[getProducts] Exception error:", error);
+    const errorMsg = error instanceof Error ? error.message : "Failed to fetch products";
+    console.error("[getProducts] Full error:", JSON.stringify(error, null, 2));
     res.status(500).json({
       success: false,
-      error: error instanceof Error ? error.message : "Failed to fetch products",
+      error: errorMsg,
+      details: error instanceof Error ? error.stack : String(error),
     });
   }
 };
