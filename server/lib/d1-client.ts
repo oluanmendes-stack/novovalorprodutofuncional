@@ -150,10 +150,18 @@ const runD1QueryFirst = async <T = any>(sql: string, params: any[] = []): Promis
 
 export async function getAllProducts(): Promise<D1Product[]> {
   if (isCloudflareD1Available()) {
-    const products = await runD1Query<D1Product>('SELECT * FROM products ORDER BY code');
-    return products.map(transformD1Product);
+    console.log("[getAllProducts] Using Cloudflare D1");
+    try {
+      const products = await runD1Query<D1Product>('SELECT * FROM products ORDER BY code');
+      console.log("[getAllProducts] D1 returned", products.length, "products");
+      return products.map(transformD1Product);
+    } catch (error) {
+      console.error("[getAllProducts] D1 query error:", error);
+      throw error;
+    }
   }
 
+  console.log("[getAllProducts] Using local SQLite");
   const db = getD1();
   const stmt = db.prepare('SELECT * FROM products ORDER BY code');
   return (stmt.all() as D1Product[]).map(transformD1Product);

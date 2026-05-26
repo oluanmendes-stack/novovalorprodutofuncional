@@ -12,6 +12,8 @@ export const onRequest: PagesFunction = async (context) => {
     // Store Cloudflare Pages bindings for runtime checks
     if (context.env) {
       (globalThis as any).__CF_ENV = context.env;
+      console.log("[Cloudflare] Available bindings:", Object.keys(context.env));
+      console.log("[Cloudflare] D1 binding available:", !!context.env.DB);
     }
 
     // Inject environment variables into process.env BEFORE initializing the app
