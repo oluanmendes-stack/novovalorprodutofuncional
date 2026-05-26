@@ -43,7 +43,7 @@ function initializeSchema() {
     console.warn('[D1] Schema file not found, creating basic schema');
     localDbInstance.exec(`
       CREATE TABLE IF NOT EXISTS products (
-        id TEXT PRIMARY KEY DEFAULT (hex(randomblob(16))),
+        id TEXT PRIMARY KEY,
         code TEXT NOT NULL UNIQUE,
         description TEXT NOT NULL,
         marca TEXT,
@@ -58,7 +58,7 @@ function initializeSchema() {
       CREATE INDEX IF NOT EXISTS idx_products_code ON products(code);
       CREATE INDEX IF NOT EXISTS idx_products_description ON products(description);
       CREATE TABLE IF NOT EXISTS compatibility (
-        id TEXT PRIMARY KEY DEFAULT (hex(randomblob(16))),
+        id TEXT PRIMARY KEY,
         equipamento TEXT NOT NULL,
         parametro TEXT,
         fabricante TEXT,
@@ -72,7 +72,7 @@ function initializeSchema() {
       );
       CREATE INDEX IF NOT EXISTS idx_compatibility_equipamento ON compatibility(equipamento);
       CREATE TABLE IF NOT EXISTS catalogs (
-        id TEXT PRIMARY KEY DEFAULT (hex(randomblob(16))),
+        id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         source TEXT,
         path TEXT,
@@ -134,13 +134,22 @@ const runD1Query = async <T = any>(sql: string, params: any[] = []): Promise<T[]
   const db = getCloudflareD1Binding();
   if (!db) throw new Error('Cloudflare D1 binding not available');
 
-  const stmt = db.prepare(sql);
-  const result = await stmt.bind(...params).all();
-  if (!result.success) {
-    throw result.error ?? new Error('D1 query failed');
-  }
+  try {
+    console.log("[D1] Executing query:", sql, "with params:", params);
+    const stmt = db.prepare(sql);
+    const result = await stmt.bind(...params).all();
 
-  return (result.results || []) as T[];
+    if (!result.success) {
+      console.error("[D1] Query failed:", result.error);
+      throw result.error ?? new Error('D1 query failed');
+    }
+
+    console.log("[D1] Query successful, returned", result.results?.length || 0, "rows");
+    return (result.results || []) as T[];
+  } catch (error) {
+    console.error("[D1] Query execution error:", error);
+    throw error;
+  }
 };
 
 const runD1QueryFirst = async <T = any>(sql: string, params: any[] = []): Promise<T | null> => {
@@ -150,10 +159,18 @@ const runD1QueryFirst = async <T = any>(sql: string, params: any[] = []): Promis
 
 export async function getAllProducts(): Promise<D1Product[]> {
   if (isCloudflareD1Available()) {
-    const products = await runD1Query<D1Product>('SELECT * FROM products ORDER BY code');
-    return products.map(transformD1Product);
+    console.log("[getAllProducts] Using Cloudflare D1");
+    try {
+      const products = await runD1Query<D1Product>('SELECT * FROM products ORDER BY code');
+      console.log("[getAllProducts] D1 returned", products.length, "products");
+      return products.map(transformD1Product);
+    } catch (error) {
+      console.error("[getAllProducts] D1 query error:", error);
+      throw error;
+    }
   }
 
+  console.log("[getAllProducts] Using local SQLite");
   const db = getD1();
   const stmt = db.prepare('SELECT * FROM products ORDER BY code');
   return (stmt.all() as D1Product[]).map(transformD1Product);
@@ -237,24 +254,34 @@ export async function insertProducts(products: Omit<D1Product, 'id' | 'created_a
   if (isCloudflareD1Available()) {
     const db = getCloudflareD1Binding();
     let count = 0;
+    console.log("[insertProducts] Inserting", products.length, "products into D1");
     for (const item of products) {
-      const stmt = db.prepare(`
-        INSERT OR REPLACE INTO products (code, description, marca, price_distributor, price_distributor_with_ipi, price_final, price_final_with_ipi, catalog_path)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-      const result = await stmt.bind(
-        item.code,
-        item.description,
-        item.marca || null,
-        item.price_distributor,
-        item.price_distributor_with_ipi,
-        item.price_final,
-        item.price_final_with_ipi,
-        item.catalog_path || null
-      ).run();
-      if (!result.success) throw result.error ?? new Error('Failed to insert product into D1');
-      count++;
+      try {
+        const stmt = db.prepare(`
+          INSERT OR REPLACE INTO products (code, description, marca, price_distributor, price_distributor_with_ipi, price_final, price_final_with_ipi, catalog_path)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        const result = await stmt.bind(
+          item.code,
+          item.description,
+          item.marca || null,
+          item.price_distributor,
+          item.price_distributor_with_ipi,
+          item.price_final,
+          item.price_final_with_ipi,
+          item.catalog_path || null
+        ).run();
+        if (!result.success) {
+          console.error("[insertProducts] Failed to insert", item.code, ":", result.error);
+          throw result.error ?? new Error('Failed to insert product into D1');
+        }
+        count++;
+      } catch (error) {
+        console.error("[insertProducts] Error inserting product", item.code, ":", error);
+        throw error;
+      }
     }
+    console.log("[insertProducts] Successfully inserted", count, "products");
     return count;
   }
 
