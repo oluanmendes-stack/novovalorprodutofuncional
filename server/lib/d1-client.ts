@@ -134,13 +134,22 @@ const runD1Query = async <T = any>(sql: string, params: any[] = []): Promise<T[]
   const db = getCloudflareD1Binding();
   if (!db) throw new Error('Cloudflare D1 binding not available');
 
-  const stmt = db.prepare(sql);
-  const result = await stmt.bind(...params).all();
-  if (!result.success) {
-    throw result.error ?? new Error('D1 query failed');
-  }
+  try {
+    console.log("[D1] Executing query:", sql, "with params:", params);
+    const stmt = db.prepare(sql);
+    const result = await stmt.bind(...params).all();
 
-  return (result.results || []) as T[];
+    if (!result.success) {
+      console.error("[D1] Query failed:", result.error);
+      throw result.error ?? new Error('D1 query failed');
+    }
+
+    console.log("[D1] Query successful, returned", result.results?.length || 0, "rows");
+    return (result.results || []) as T[];
+  } catch (error) {
+    console.error("[D1] Query execution error:", error);
+    throw error;
+  }
 };
 
 const runD1QueryFirst = async <T = any>(sql: string, params: any[] = []): Promise<T | null> => {
@@ -245,24 +254,34 @@ export async function insertProducts(products: Omit<D1Product, 'id' | 'created_a
   if (isCloudflareD1Available()) {
     const db = getCloudflareD1Binding();
     let count = 0;
+    console.log("[insertProducts] Inserting", products.length, "products into D1");
     for (const item of products) {
-      const stmt = db.prepare(`
-        INSERT OR REPLACE INTO products (code, description, marca, price_distributor, price_distributor_with_ipi, price_final, price_final_with_ipi, catalog_path)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-      const result = await stmt.bind(
-        item.code,
-        item.description,
-        item.marca || null,
-        item.price_distributor,
-        item.price_distributor_with_ipi,
-        item.price_final,
-        item.price_final_with_ipi,
-        item.catalog_path || null
-      ).run();
-      if (!result.success) throw result.error ?? new Error('Failed to insert product into D1');
-      count++;
+      try {
+        const stmt = db.prepare(`
+          INSERT OR REPLACE INTO products (code, description, marca, price_distributor, price_distributor_with_ipi, price_final, price_final_with_ipi, catalog_path)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        const result = await stmt.bind(
+          item.code,
+          item.description,
+          item.marca || null,
+          item.price_distributor,
+          item.price_distributor_with_ipi,
+          item.price_final,
+          item.price_final_with_ipi,
+          item.catalog_path || null
+        ).run();
+        if (!result.success) {
+          console.error("[insertProducts] Failed to insert", item.code, ":", result.error);
+          throw result.error ?? new Error('Failed to insert product into D1');
+        }
+        count++;
+      } catch (error) {
+        console.error("[insertProducts] Error inserting product", item.code, ":", error);
+        throw error;
+      }
     }
+    console.log("[insertProducts] Successfully inserted", count, "products");
     return count;
   }
 
